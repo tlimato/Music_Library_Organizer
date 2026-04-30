@@ -33,19 +33,18 @@ except ImportError:
 DRY_RUN = False
 
 # Root folder containing your music (edit or pass as a command-line arg)
-MUSIC_ROOT = r"C:\Music"
+MUSIC_ROOT = r"C:\Users\tylim\Music"
 
 # Output folder (same as MUSIC_ROOT to reorganize in place)
-OUTPUT_ROOT = r"C:\Music"
+OUTPUT_ROOT = r"C:\Users\tylim\Music"
 
 # How similar two album names need to be to be flagged as a match (0-100)
-FUZZY_THRESHOLD = 80
-
+FUZZY_THRESHOLD = 75
 # The folder name all Christmas music gets merged into
 CHRISTMAS_FOLDER = "Christmas"
 
 # How similar an album name needs to be to a Christmas keyword to be flagged (0-100)
-CHRISTMAS_THRESHOLD = 75
+CHRISTMAS_THRESHOLD = 90
 
 # Keywords that indicate Christmas music
 CHRISTMAS_KEYWORDS = [
