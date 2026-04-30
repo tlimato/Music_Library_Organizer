@@ -5,17 +5,15 @@ Reorganizes audio files into:
     <Album>/<Track#> - <Title>.<ext>
 
 Fuzzy-matches similar album names and lets you pick the canonical name
-before moving anything.
+before moving anything. Also merges Christmas music into one folder.
 
 Requirements:
     pip install mutagen rapidfuzz
 """
 
-import os
 import re
 import shutil
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 try:
@@ -35,21 +33,33 @@ except ImportError:
 DRY_RUN = False
 
 # Root folder containing your music (edit or pass as a command-line arg)
-MUSIC_ROOT = r"C:\Users\tylim\Music"
+MUSIC_ROOT = r"C:\Music"
 
 # Output folder (same as MUSIC_ROOT to reorganize in place)
-OUTPUT_ROOT = r"C:\Users\tylim\Music"
+OUTPUT_ROOT = r"C:\Music"
 
 # How similar two album names need to be to be flagged as a match (0-100)
-# 80 is a good default — lower = more aggressive matching
-FUZZY_THRESHOLD = 50
+FUZZY_THRESHOLD = 80
+
+# The folder name all Christmas music gets merged into
+CHRISTMAS_FOLDER = "Christmas"
+
+# How similar an album name needs to be to a Christmas keyword to be flagged (0-100)
+CHRISTMAS_THRESHOLD = 75
+
+# Keywords that indicate Christmas music
+CHRISTMAS_KEYWORDS = [
+    "christmas", "xmas", "holiday", "holidays", "noel", "santa",
+    "jingle", "winter wonderland", "silent night", "deck the halls",
+    "yule", "yuletide", "festive", "advent"
+]
 
 # Audio extensions to process
 AUDIO_EXTENSIONS = {".mp3", ".flac", ".m4a", ".ogg", ".opus", ".wav", ".aac"}
 
-FALLBACK_ALBUM  = "Unknown Album"
-FALLBACK_TRACK  = "00"
-FALLBACK_TITLE  = None  # None = use filename
+FALLBACK_ALBUM = "Unknown Album"
+FALLBACK_TRACK = "00"
+FALLBACK_TITLE = None  # None = use filename
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -110,14 +120,80 @@ def extract_metadata(path: Path) -> dict:
     }
 
 
-# ── Fuzzy album grouping ──────────────────────────────────────────────────────
+# ── Christmas detection ───────────────────────────────────────────────────────
 
-def fuzzy_merge_albums(album_names: list, threshold: int) -> dict:
+def is_christmas(album_name: str) -> bool:
     """
-    Returns a mapping of {original_album_name: canonical_album_name}.
-    Groups similar album names together and asks the user to pick one.
+    Returns True if the album name fuzzy-matches any Christmas keyword
+    or contains one as a substring.
+    """
+    lower = album_name.lower()
+
+    # Direct substring check first (fast)
+    for keyword in CHRISTMAS_KEYWORDS:
+        if keyword in lower:
+            return True
+
+    # Fuzzy match against each keyword
+    for keyword in CHRISTMAS_KEYWORDS:
+        score = fuzz.partial_ratio(keyword, lower)
+        if score >= CHRISTMAS_THRESHOLD:
+            return True
+
+    return False
+
+
+def find_christmas_albums(album_names: list) -> dict:
+    """
+    Scans all unique album names, flags Christmas ones, confirms with
+    the user, and returns a mapping of {album_name: CHRISTMAS_FOLDER}.
     """
     unique = list(dict.fromkeys(album_names))
+    flagged = [name for name in unique if is_christmas(name)]
+
+    if not flagged:
+        print("No Christmas albums detected.")
+        return {}
+
+    print("\n" + "─" * 60)
+    print("These albums look like Christmas music and will be merged")
+    print(f'into one folder called "{CHRISTMAS_FOLDER}":\n')
+    keep = []
+    for i, name in enumerate(flagged, 1):
+        print(f"  {i}. {name}")
+
+    print("\nOptions:")
+    print("  A  — Accept all and merge them")
+    print("  N  — Reject all, keep them separate")
+    print("  Or enter comma-separated numbers to accept only some (e.g. 1,3)")
+
+    while True:
+        choice = input("\nYour choice: ").strip().upper()
+        if choice == "A":
+            keep = flagged
+            break
+        elif choice == "N":
+            keep = []
+            break
+        else:
+            try:
+                indices = [int(x.strip()) - 1 for x in choice.split(",")]
+                keep = [flagged[i] for i in indices if 0 <= i < len(flagged)]
+                break
+            except (ValueError, IndexError):
+                print("Invalid input, try again.")
+
+    return {name: CHRISTMAS_FOLDER for name in keep}
+
+
+# ── Fuzzy album grouping ──────────────────────────────────────────────────────
+
+def fuzzy_merge_albums(album_names: list, threshold: int, skip: set) -> dict:
+    """
+    Returns a mapping of {original_album_name: canonical_album_name}.
+    Skips albums already assigned (e.g. Christmas ones).
+    """
+    unique = [a for a in dict.fromkeys(album_names) if a not in skip]
     groups = []
     assigned = set()
 
@@ -187,9 +263,16 @@ def organize(music_root: str):
     print(f"Found {len(files)} audio file(s). Scanning tags...\n")
 
     file_meta = {f: extract_metadata(f) for f in sorted(files)}
-
     all_albums = [m["album"] for m in file_meta.values()]
-    album_mapping = fuzzy_merge_albums(all_albums, FUZZY_THRESHOLD)
+
+    # Step 1 — detect and confirm Christmas albums
+    christmas_mapping = find_christmas_albums(all_albums)
+
+    # Step 2 — fuzzy merge remaining albums (skip Christmas ones)
+    album_mapping = fuzzy_merge_albums(all_albums, FUZZY_THRESHOLD, skip=set(christmas_mapping.keys()))
+
+    # Merge both mappings (Christmas takes priority)
+    album_mapping.update(christmas_mapping)
 
     print("\n" + "─" * 60)
     print(f"DRY_RUN={DRY_RUN}\n")
